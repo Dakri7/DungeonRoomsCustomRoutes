@@ -81,6 +81,7 @@ public class DungeonRooms
 
     public static JsonObject roomsJson;
     public static JsonObject waypointsJson;
+    public static JsonObject routesJson;
     public static HashMap<String,HashMap<String,long[]>> ROOM_DATA = new HashMap<>();
 
     public static boolean usingSBPSecrets = false;
@@ -140,20 +141,7 @@ public class DungeonRooms
         }
 
         //get room and waypoint info
-        try (BufferedReader roomsReader = new BufferedReader(new InputStreamReader(mc.getResourceManager()
-                .getResource(new ResourceLocation("dungeonrooms", "dungeonrooms.json")).getInputStream()));
-            BufferedReader waypointsReader = new BufferedReader(new InputStreamReader(mc.getResourceManager()
-                .getResource(new ResourceLocation("dungeonrooms", "secretlocations.json")).getInputStream()))
-        ) {
-            Gson gson = new Gson();
-            roomsJson = gson.fromJson(roomsReader, JsonObject.class);
-            logger.info("DungeonRooms: Loaded dungeonrooms.json");
-
-            waypointsJson = gson.fromJson(waypointsReader, JsonObject.class);
-            logger.info("DungeonRooms: Loaded secretlocations.json");
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        loadJsons();
 
 
         //set RoomData to futures - this will block if the rest of init was fast
@@ -177,6 +165,27 @@ public class DungeonRooms
         }
         executor.shutdown();
     }
+
+	public static void loadJsons() {
+		try (BufferedReader roomsReader = new BufferedReader(new InputStreamReader(Minecraft.getMinecraft().getResourceManager()
+                .getResource(new ResourceLocation("dungeonrooms", "dungeonrooms.json")).getInputStream()));
+            BufferedReader waypointsReader = new BufferedReader(new InputStreamReader(Minecraft.getMinecraft().getResourceManager()
+                .getResource(new ResourceLocation("dungeonrooms", "secretlocations.json")).getInputStream()));
+    		BufferedReader routesReader = new BufferedReader(new FileReader("E:\\devel\\DungeonRoomsMod\\src\\main\\resources\\assets\\dungeonrooms\\routes.json"))
+        ) {
+            Gson gson = new Gson();
+            roomsJson = gson.fromJson(roomsReader, JsonObject.class);
+            logger.info("DungeonRooms: Loaded dungeonrooms.json");
+
+            waypointsJson = gson.fromJson(waypointsReader, JsonObject.class);
+            logger.info("DungeonRooms: Loaded secretlocations.json");
+            
+            routesJson = gson.fromJson(routesReader, JsonObject.class);
+            logger.info("DungeonRooms: Loaded routes.json");
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+	}
 
     @EventHandler
     public void postInit(final FMLPostInitializationEvent event) {

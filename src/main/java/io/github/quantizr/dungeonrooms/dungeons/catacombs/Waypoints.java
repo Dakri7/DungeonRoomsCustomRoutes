@@ -29,13 +29,18 @@ import net.minecraft.block.Block;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.renderer.GlStateManager;
+import net.minecraft.client.renderer.Tessellator;
+import net.minecraft.client.renderer.WorldRenderer;
 import net.minecraft.client.renderer.culling.Frustum;
+import net.minecraft.client.renderer.vertex.DefaultVertexFormats;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.item.EntityItem;
 import net.minecraft.init.Blocks;
 import net.minecraft.network.play.server.S0DPacketCollectItem;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.BlockPos;
+import net.minecraft.util.ChatComponentText;
+import net.minecraft.util.IChatComponent;
 import net.minecraft.util.StringUtils;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.client.event.RenderWorldLastEvent;
@@ -46,8 +51,13 @@ import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 import net.minecraftforge.fml.common.gameevent.InputEvent;
 
 import java.awt.*;
+import java.awt.datatransfer.Clipboard;
+import java.awt.datatransfer.StringSelection;
 import java.util.*;
 import java.util.List;
+
+import org.lwjgl.input.Keyboard;
+import org.lwjgl.opengl.GL11;
 
 public class Waypoints {
     public static boolean enabled = true;
@@ -57,6 +67,7 @@ public class Waypoints {
     public static boolean showSecrets = true;
     public static boolean showFairySouls = true;
     public static boolean showStonk = true;
+    public static boolean showRoute = true;	//TODO Add to options
     public static boolean sneakToDisable = true;
 
     public static boolean disableWhenAllFound = true;
@@ -84,7 +95,12 @@ public class Waypoints {
         if (practiceModeOn && !DungeonRooms.keyBindings[2].isKeyDown()) return;
         String roomName = RoomDetection.roomName;
         if (roomName.equals("undefined") || DungeonRooms.roomsJson.get(roomName) == null || secretsList == null) return;
-        if (DungeonRooms.waypointsJson.get(roomName) != null) {
+        drawSecretWaypoints(event, roomName);
+        drawRoutesWaypoints(event, roomName);
+    }
+
+	private void drawSecretWaypoints(RenderWorldLastEvent event, String roomName) {
+		if (DungeonRooms.waypointsJson.get(roomName) != null) {
             JsonArray secretsArray = DungeonRooms.waypointsJson.get(roomName).getAsJsonArray();
             int arraySize = secretsArray.size();
             for(int i = 0; i < arraySize; i++) {
@@ -105,6 +121,8 @@ public class Waypoints {
 
                 BlockPos relative = new BlockPos(secretsObject.get("x").getAsInt(), secretsObject.get("y").getAsInt(), secretsObject.get("z").getAsInt());
                 BlockPos pos = MapUtils.relativeToActual(relative, RoomDetection.roomDirection, RoomDetection.roomCorner);
+                
+                
                 Entity viewer = Minecraft.getMinecraft().getRenderViewEntity();
                 frustum.setPosition(viewer.posX, viewer.posY, viewer.posZ);
                 if (!frustum.isBoxInFrustum(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, 255, pos.getZ() + 1)){
@@ -113,6 +131,7 @@ public class Waypoints {
 
 
                 Color color;
+                float alpha = 0.4f;
                 switch (secretsObject.get("category").getAsString()) {
                     case "entrance":
                         if (!showEntrance) continue;
@@ -166,7 +185,7 @@ public class Waypoints {
                 GlStateManager.disableDepth();
                 GlStateManager.disableCull();
                 if (showBoundingBox && frustum.isBoxInFrustum(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1)) {
-                    WaypointUtils.drawFilledBoundingBox(new AxisAlignedBB(x, y, z, x + 1, y + 1, z + 1), color, 0.4f);
+                    WaypointUtils.drawFilledBoundingBox(new AxisAlignedBB(x, y, z, x + 1, y + 1, z + 1), color, alpha);
                 }
                 GlStateManager.disableTexture2D();
                 if (showBeacon && distSq > 5*5) WaypointUtils.renderBeaconBeam(x, y + 1, z, color.getRGB(), 0.25f, event.partialTicks);
@@ -177,6 +196,94 @@ public class Waypoints {
                 GlStateManager.enableCull();
             }
         }
+	}
+	
+	private void drawRoutesWaypoints(RenderWorldLastEvent event, String roomName) {
+		if (DungeonRooms.routesJson.get(roomName) != null) {
+            JsonArray routesArray = DungeonRooms.routesJson.get(roomName).getAsJsonArray();
+            int arraySize = routesArray.size();
+            BlockPos prevPos = null;
+            for(int i = 0; i < arraySize; i++) {
+                JsonObject routesObject = routesArray.get(i).getAsJsonObject();
+
+                if (disableWhenAllFound && allFound) continue;
+
+                BlockPos relative = new BlockPos(routesObject.get("x").getAsInt(), routesObject.get("y").getAsInt(), routesObject.get("z").getAsInt());
+                BlockPos pos = MapUtils.relativeToActual(relative, RoomDetection.roomDirection, RoomDetection.roomCorner);
+                
+                boolean draw = true;
+                Entity viewer = Minecraft.getMinecraft().getRenderViewEntity();
+                frustum.setPosition(viewer.posX, viewer.posY, viewer.posZ);
+                if (!frustum.isBoxInFrustum(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, 255, pos.getZ() + 1)){
+                    draw = false;
+                }
+
+                if(draw) {
+		            float alpha = 0.2f;
+		            Color color = prevPos == null ? new Color(219, 172, 52): new Color(173, 216, 230);
+		
+		            double viewerX = viewer.lastTickPosX + (viewer.posX - viewer.lastTickPosX) * event.partialTicks;
+		            double viewerY = viewer.lastTickPosY + (viewer.posY - viewer.lastTickPosY) * event.partialTicks;
+		            double viewerZ = viewer.lastTickPosZ + (viewer.posZ - viewer.lastTickPosZ) * event.partialTicks;
+		
+		            double x = pos.getX() - viewerX;
+		            double y = pos.getY() - viewerY;
+		            double z = pos.getZ() - viewerZ;
+		
+		            GlStateManager.disableDepth();
+		            GlStateManager.disableCull();
+		            if (showBoundingBox && frustum.isBoxInFrustum(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1)) {
+		                WaypointUtils.drawFilledBoundingBox(new AxisAlignedBB(x, y, z, x + 1, y + 1, z + 1), color, alpha);
+		            }
+		            GlStateManager.disableTexture2D();
+		            GlStateManager.disableLighting();
+		            GlStateManager.enableTexture2D();
+		            GlStateManager.enableDepth();
+		            GlStateManager.enableCull();
+                }
+                if(prevPos != null) {
+                    drawLine(pos, prevPos, new Color(173, 216, 230), event.partialTicks);
+                }
+                prevPos = pos;
+            }
+        }
+	}
+    
+    //Code stolen from DungeonGuide https://github.com/Dungeons-Guide/Skyblock-Dungeons-Guide
+    public static void drawLine(BlockPos pos1, BlockPos pos2, Color colour, float partialTicks) {
+        Entity render = Minecraft.getMinecraft().getRenderViewEntity();
+        WorldRenderer worldRenderer = Tessellator.getInstance().getWorldRenderer();
+
+        double realX = render.lastTickPosX + (render.posX - render.lastTickPosX) * partialTicks;
+        double realY = render.lastTickPosY + (render.posY - render.lastTickPosY) * partialTicks;
+        double realZ = render.lastTickPosZ + (render.posZ - render.lastTickPosZ) * partialTicks;
+
+        GlStateManager.pushMatrix();
+        GlStateManager.translate(-realX, -realY, -realZ);
+        GlStateManager.disableTexture2D();
+        GlStateManager.disableDepth();
+        GlStateManager.depthMask(false);
+        GlStateManager.disableCull();
+        GlStateManager.enableBlend();
+        GlStateManager.disableAlpha();
+        GlStateManager.tryBlendFuncSeparate(770, 771, 1, 0);
+        GL11.glLineWidth(2);
+        GlStateManager.color(colour.getRed() / 255f, colour.getGreen() / 255f, colour.getBlue()/ 255f, colour.getAlpha() / 255f);
+        worldRenderer.begin(GL11.GL_LINES, DefaultVertexFormats.POSITION);
+
+        worldRenderer.pos(pos1.getX() + 0.5, pos1.getY() + 0.5, pos1.getZ() + 0.5).endVertex();
+        worldRenderer.pos(pos2.getX() + 0.5, pos2.getY() + 0.5, pos2.getZ() + 0.5).endVertex();
+        Tessellator.getInstance().draw();
+
+        GlStateManager.translate(realX, realY, realZ);
+        GlStateManager.disableBlend();
+        GlStateManager.enableDepth();
+        GlStateManager.depthMask(true);
+        GlStateManager.enableCull();
+        GlStateManager.enableAlpha();
+        GlStateManager.enableTexture2D();
+        GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+        GlStateManager.popMatrix();
     }
 
 
@@ -205,10 +312,29 @@ public class Waypoints {
     @SubscribeEvent
     public void onInteract(PlayerInteractEvent event) {
         if (!Utils.inCatacombs || !enabled) return;
+        
+        if (event.action == PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK) {
+	        //Debug print coords:
+	        EntityPlayerSP player = Minecraft.getMinecraft().thePlayer;
+	        BlockPos evntPos = MapUtils.actualToRelative(event.pos, RoomDetection.roomDirection, RoomDetection.roomCorner);
+	        player.addChatMessage(new ChatComponentText("Coords of clicked Block: " + evntPos.getX() + " " + evntPos.getY() + " " + evntPos.getZ()));
+	        String myString = String.format("{\n"
+	        		+ "      \"secretName\":\"Start\",\n"
+	        		+ "      \"category\":\"route\",\n"
+	        		+ "      \"x\":%d,\n"
+	        		+ "      \"y\":%d,\n"
+	        		+ "      \"z\":%d\n"
+	        		+ "    }", evntPos.getX(), evntPos.getY(), evntPos.getZ());
+	        StringSelection stringSelection = new StringSelection(myString);
+	        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+	        clipboard.setContents(stringSelection, null);
+        }
+        
         if (disableWhenAllFound && allFound) return;
 
         if (event.action == PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK) {
             Block block = event.world.getBlockState(event.pos).getBlock();
+            
             if (block != Blocks.chest && block != Blocks.skull) return;
             String roomName = RoomDetection.roomName;
             if (roomName.equals("undefined") || DungeonRooms.roomsJson.get(roomName) == null || secretsList == null) return;
@@ -293,6 +419,9 @@ public class Waypoints {
     @SubscribeEvent
     public void onKey(InputEvent.KeyInputEvent event) {
         if (!Utils.inCatacombs || !enabled || !sneakToDisable) return;
+        if(Keyboard.isKeyDown(Keyboard.KEY_J))
+            DungeonRooms.loadJsons();
+        
         EntityPlayerSP player = Minecraft.getMinecraft().thePlayer;
         if (FMLClientHandler.instance().getClient().gameSettings.keyBindSneak.isPressed()) {
             if (System.currentTimeMillis() - lastSneakTime < 500) { //check for two taps in under half a second
